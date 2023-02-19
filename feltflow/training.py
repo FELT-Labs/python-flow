@@ -1,6 +1,5 @@
 import os
 import time
-from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from brownie.network import accounts
@@ -89,8 +88,6 @@ def main():
     )
 
     # TODO: Or possible speed up by allowing all spend for fixed exchange first
-    # TODO: Calculate valid_until properly
-    # Pay for dataset and algo for 1 day
     datasets, algorithm = pay_for_compute_service(
         datasets=[DATA_compute_input],
         algorithm_data=ALGO_compute_input,

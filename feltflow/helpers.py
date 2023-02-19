@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta, timezone
-from typing import List
+from typing import List, Union
 
 from ocean_lib.data_provider.data_service_provider import DataServiceProvider
 from ocean_lib.models.compute_input import ComputeInput
@@ -11,7 +11,7 @@ from ocean_lib.ocean.util import get_address_of_type, to_wei
 
 def get_valid_until_time(
     max_job_duration: float, dataset_timeout: float, algorithm_timeout: float
-):
+) -> int:
     """Compute valid until time."""
     # Min time should be in minutes
     min_time = min(
@@ -20,7 +20,9 @@ def get_valid_until_time(
     return int((datetime.now(timezone.utc) + timedelta(minutes=min_time)).timestamp())
 
 
-def get_typed_datatoken(ocean: Ocean, token_address: str):
+def get_typed_datatoken(
+    ocean: Ocean, token_address: str
+) -> Union[Datatoken, DatatokenEnterprise]:
     """Get datatoken class depending on datatoken id.
 
     Datatoken id:
@@ -51,11 +53,11 @@ def start_or_reuse_order_based_on_initialize_response(
     service = asset_compute_input.service
     dt = get_typed_datatoken(ocean, service.datatoken)
 
-    # if valid_order and provider_fees:
-    #     asset_compute_input.transfer_tx_id = dt.reuse_order(
-    #         valid_order, provider_fees=provider_fees, tx_dict=tx_dict
-    #     ).txid
-    #     return
+    if valid_order and provider_fees:
+        asset_compute_input.transfer_tx_id = dt.reuse_order(
+            valid_order, provider_fees=provider_fees, tx_dict=tx_dict
+        ).txid
+        return
 
     # TODO: Add some requirements on extended DDO with access_details
     if asset_compute_input.ddo.access_details["type"] == "fixed":
