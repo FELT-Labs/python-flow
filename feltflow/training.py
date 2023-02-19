@@ -10,7 +10,7 @@ from ocean_lib.models.compute_input import ComputeInput
 from ocean_lib.ocean.ocean import Ocean
 from ocean_lib.web3_internal.utils import connect_to_network
 
-from feltflow.helpers import pay_for_compute_service
+from feltflow.helpers import get_valid_until_time, pay_for_compute_service
 from feltflow.subgraph import get_access_details
 
 load_dotenv()
@@ -21,6 +21,18 @@ load_dotenv()
 # Use environment variables to set infura and private key
 # os.environ["WEB3_INFURA_PROJECT_ID"] = ""
 # os.environ["PRIVATE_KEY"] = ""
+
+
+# TODO: Class compute
+#   - init with dids
+#   - run compute(given algo, algocustomdata)
+#   - get results
+#
+# TODO: Class fed compute (sub from compute class)
+#   - fed run
+#   - run compute (local, algo def)
+#   - run agg -> run compute (fed, output of locals)
+#   - get results or repeat
 
 
 def main():
@@ -65,12 +77,18 @@ def main():
     }
 
     DATA_compute_input = ComputeInput(
-        data_ddo, compute_service, data_ddo.access_details["valid_order_tx"]
-    )
-    ALGO_compute_input = ComputeInput(
-        algo_ddo, algo_service, algo_ddo.access_details["valid_order_tx"]
+        data_ddo, compute_service, data_ddo.access_details.get("valid_order_tx", "")
     )
 
+    ALGO_compute_input = ComputeInput(
+        algo_ddo, algo_service, algo_ddo.access_details.get("valid_order_tx", "")
+    )
+
+    valid_unitl = get_valid_until_time(
+        free_c2d_env["maxJobDuration"], compute_service.timeout, algo_service.timeout
+    )
+
+    # TODO: Or possible speed up by allowing all spend for fixed exchange first
     # TODO: Calculate valid_until properly
     # Pay for dataset and algo for 1 day
     datasets, algorithm = pay_for_compute_service(
@@ -79,9 +97,7 @@ def main():
         consume_market_order_fee_address=account.address,
         tx_dict={"from": account},
         compute_environment=free_c2d_env["id"],
-        valid_until=int(
-            (datetime.now(timezone.utc) + timedelta(minutes=60)).timestamp()
-        ),
+        valid_until=valid_unitl,
         consumer_address=free_c2d_env["consumerAddress"],
         ocean=ocean,
     )

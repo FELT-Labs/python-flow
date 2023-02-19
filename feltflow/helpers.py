@@ -1,11 +1,36 @@
+from datetime import datetime, timedelta, timezone
 from typing import List
 
 from ocean_lib.data_provider.data_service_provider import DataServiceProvider
 from ocean_lib.models.compute_input import ComputeInput
-from ocean_lib.models.datatoken import TokenFeeInfo
+from ocean_lib.models.datatoken import Datatoken, TokenFeeInfo
 from ocean_lib.models.datatoken_enterprise import DatatokenEnterprise
 from ocean_lib.ocean.ocean import Ocean
-from ocean_lib.ocean.util import to_wei
+from ocean_lib.ocean.util import get_address_of_type, to_wei
+
+
+def get_valid_until_time(
+    max_job_duration: float, dataset_timeout: float, algorithm_timeout: float
+):
+    """Compute valid until time."""
+    # Min time should be in minutes
+    min_time = min(
+        filter(lambda x: x != 0, [max_job_duration, dataset_timeout, algorithm_timeout])
+    )
+    return int((datetime.now(timezone.utc) + timedelta(minutes=min_time)).timestamp())
+
+
+def get_typed_datatoken(ocean: Ocean, token_address: str):
+    """Get datatoken class depending on datatoken id.
+
+    Datatoken id:
+        1 - Datatoken
+        2 - DatatokneEnterprise
+    """
+    dt = Datatoken(ocean.config, token_address)
+    if dt.getId() == 2:
+        return DatatokenEnterprise(ocean.config, token_address)
+    return dt
 
 
 def start_or_reuse_order_based_on_initialize_response(
@@ -24,26 +49,57 @@ def start_or_reuse_order_based_on_initialize_response(
         return
 
     service = asset_compute_input.service
-    dt = DatatokenEnterprise(ocean.config_dict, service.datatoken)
+    dt = get_typed_datatoken(ocean, service.datatoken)
 
-    if valid_order and provider_fees:
-        asset_compute_input.transfer_tx_id = dt.reuse_order(
-            valid_order, provider_fees=provider_fees, tx_dict=tx_dict
-        ).txid
-        return
+    # if valid_order and provider_fees:
+    #     asset_compute_input.transfer_tx_id = dt.reuse_order(
+    #         valid_order, provider_fees=provider_fees, tx_dict=tx_dict
+    #     ).txid
+    #     return
 
     # TODO: Add some requirements on extended DDO with access_details
     if asset_compute_input.ddo.access_details["type"] == "fixed":
-        asset_compute_input.transfer_tx_id = dt.buy_DT_and_order(
-            consumer=consumer_address,
-            service_index=asset_compute_input.ddo.get_index_of_service(service),
-            provider_fees=provider_fees,
-            exchange=dt.get_exchanges()[0],
-            max_base_token_amount=to_wei(1000),  # TODO: add proper value
-            consume_market_swap_fee_amount=consume_market_fees.amount,
-            consume_market_swap_fee_address=consume_market_fees.address,
-            tx_dict=tx_dict,
-        ).txid
+        exchange = dt.get_exchanges()[0]
+
+        amt_needed = exchange.BT_needed(to_wei(1), consume_market_fees.amount)
+        base_token = Datatoken(exchange._FRE.config_dict, exchange.details.base_token)
+
+        base_token_balance = base_token.balanceOf(tx_dict["from"])
+        if base_token_balance < amt_needed:
+            raise ValueError(
+                f"Your token balance {base_token_balance} {base_token.symbol()} is not sufficient "
+                f"to execute the requested service. This service "
+                f"requires {amt_needed} {base_token.symbol()}."
+            )
+
+        # Approve base token for buying data token
+        base_token.approve(
+            dt.address,
+            amt_needed,
+            tx_dict,
+        )
+
+        # Run purchase depending on datatoken type
+        if dt.getId() == 2:
+            asset_compute_input.transfer_tx_id = dt.buy_DT_and_order(
+                consumer=consumer_address,
+                service_index=asset_compute_input.ddo.get_index_of_service(service),
+                provider_fees=provider_fees,
+                exchange=exchange,
+                max_base_token_amount=amt_needed,
+                consume_market_swap_fee_amount=consume_market_fees.amount,
+                consume_market_swap_fee_address=consume_market_fees.address,
+                tx_dict=tx_dict,
+            ).txid
+        else:
+            asset_compute_input.transfer_tx_id = dt.buy_DT_and_order(
+                consumer=consumer_address,
+                service_index=asset_compute_input.ddo.get_index_of_service(service),
+                provider_fees=provider_fees,
+                exchange=exchange,
+                tx_dict=tx_dict,
+            ).txid
+
     elif asset_compute_input.ddo.access_details["type"] == "free":
         asset_compute_input.transfer_tx_id = dt.dispense_and_order(
             consumer=consumer_address,
