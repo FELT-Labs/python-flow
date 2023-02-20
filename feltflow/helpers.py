@@ -15,7 +15,10 @@ def get_valid_until_time(
     """Compute valid until time."""
     # Min time should be in minutes
     min_time = min(
-        filter(lambda x: x != 0, [max_job_duration, dataset_timeout, algorithm_timeout])
+        filter(
+            lambda x: x != 0,
+            map(float, [max_job_duration, dataset_timeout, algorithm_timeout]),
+        )
     )
     return int((datetime.now(timezone.utc) + timedelta(minutes=min_time)).timestamp())
 
@@ -74,15 +77,28 @@ def start_or_reuse_order_based_on_initialize_response(
                 f"requires {amt_needed} {base_token.symbol()}."
             )
 
-        # Approve base token for buying data token
-        base_token.approve(
-            dt.address,
-            amt_needed,
-            tx_dict,
-        )
-
         # Run purchase depending on datatoken type
         if dt.getId() == 2:
+            if provider_fees:
+                if base_token.address != provider_fees["providerFeeToken"]:
+                    token = get_typed_datatoken(
+                        ocean, provider_fees["providerFeeToken"]
+                    )
+                    token.approve(
+                        dt.address,
+                        int(provider_fees["providerFeeAmount"]),
+                        tx_dict,
+                    )
+                else:
+                    amt_needed += int(provider_fees["providerFeeAmount"])
+
+            # Approve base token for buying data token
+            base_token.approve(
+                dt.address,
+                amt_needed,
+                tx_dict,
+            )
+
             asset_compute_input.transfer_tx_id = dt.buy_DT_and_order(
                 consumer=consumer_address,
                 service_index=asset_compute_input.ddo.get_index_of_service(service),
@@ -94,6 +110,13 @@ def start_or_reuse_order_based_on_initialize_response(
                 tx_dict=tx_dict,
             ).txid
         else:
+            # Approve base token for buying data token
+            base_token.approve(
+                exchange.address,
+                amt_needed,
+                tx_dict,
+            )
+
             asset_compute_input.transfer_tx_id = dt.buy_DT_and_order(
                 consumer=consumer_address,
                 service_index=asset_compute_input.ddo.get_index_of_service(service),
@@ -103,6 +126,7 @@ def start_or_reuse_order_based_on_initialize_response(
             ).txid
 
     elif asset_compute_input.ddo.access_details["type"] == "free":
+        # TODO: For different types + approve fees to datatoken
         asset_compute_input.transfer_tx_id = dt.dispense_and_order(
             consumer=consumer_address,
             service_index=asset_compute_input.ddo.get_index_of_service(service),
@@ -123,13 +147,12 @@ def pay_for_compute_service(
     consumer_address: str,
     ocean: Ocean,
 ):
-    data_provider = DataServiceProvider
     wallet_address = tx_dict["from"]
 
     if not consumer_address:
         consumer_address = wallet_address
 
-    initialize_response = data_provider.initialize_compute(
+    initialize_response = DataServiceProvider.initialize_compute(
         [x.as_dictionary() for x in datasets],
         algorithm_data.as_dictionary(),
         datasets[0].service.service_endpoint,

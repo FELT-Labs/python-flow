@@ -9,8 +9,7 @@ from ocean_lib.models.compute_input import ComputeInput
 from ocean_lib.ocean.ocean import Ocean
 from ocean_lib.web3_internal.utils import connect_to_network
 
-from feltflow.helpers import get_valid_until_time, pay_for_compute_service
-from feltflow.subgraph import get_access_details
+from feltflow.comput_job import ComputeJob
 
 load_dotenv()
 
@@ -49,23 +48,6 @@ def main():
     print("Account balance", account.balance())
     print("Ocean balance", ocean.OCEAN_token.balanceOf(account))
 
-    data_ddo = ocean.assets.resolve(data_did)
-    algo_ddo = ocean.assets.resolve(algo_did)
-
-    # TODO: Check service types and compatibility
-    compute_service = data_ddo.services[0]
-    algo_service = algo_ddo.services[0]
-    free_c2d_env = ocean.compute.get_free_c2d_environment(
-        compute_service.service_endpoint
-    )
-
-    data_ddo.access_details = get_access_details(
-        compute_service, config["NETWORK_NAME"], account.address
-    )
-    algo_ddo.access_details = get_access_details(
-        algo_service, config["NETWORK_NAME"], account.address
-    )
-
     algocustomdata = {
         "model_definition": {
             "model_name": "LinearRegression",
@@ -75,56 +57,10 @@ def main():
         "target_column": -1,
     }
 
-    DATA_compute_input = ComputeInput(
-        data_ddo, compute_service, data_ddo.access_details.get("valid_order_tx", "")
-    )
-
-    ALGO_compute_input = ComputeInput(
-        algo_ddo, algo_service, algo_ddo.access_details.get("valid_order_tx", "")
-    )
-
-    valid_unitl = get_valid_until_time(
-        free_c2d_env["maxJobDuration"], compute_service.timeout, algo_service.timeout
-    )
-
-    # TODO: Or possible speed up by allowing all spend for fixed exchange first
-    datasets, algorithm = pay_for_compute_service(
-        datasets=[DATA_compute_input],
-        algorithm_data=ALGO_compute_input,
-        consume_market_order_fee_address=account.address,
-        tx_dict={"from": account},
-        compute_environment=free_c2d_env["id"],
-        valid_until=valid_unitl,
-        consumer_address=free_c2d_env["consumerAddress"],
-        ocean=ocean,
-    )
-    print(datasets, algorithm.as_dictionary())
-
-    # Start compute job
-    job_id = ocean.compute.start(
-        consumer_wallet=account,
-        dataset=datasets[0],
-        compute_environment=free_c2d_env["id"],
-        algorithm=algorithm,
-        algorithm_algocustomdata=algocustomdata,
-    )
-    print(f"Started compute job with id: {job_id}")
-
-    status = {}
-    succeeded = False
-    for _ in range(0, 200):
-        status = ocean.compute.status(data_ddo, compute_service, job_id, account)
-        # print("Status", status)
-        if status.get("dateFinished") and Decimal(status["dateFinished"]) > 0:
-            succeeded = True
-            break
+    compute_job = ComputeJob(ocean, [data_did], algo_did, algocustomdata)
+    compute_job.start(account)
+    while compute_job.state == "running":
+        compute_job.check_status(account)
         time.sleep(5)
 
-    if succeeded:
-        for i, file_info in enumerate(status["results"]):
-            output = ocean.compute.result(data_ddo, compute_service, job_id, i, account)
-            print(file_info["filename"])
-            # print(output)
-            print()
-    else:
-        print("FAILED")
+    print(compute_job.get_file_url("model", account))

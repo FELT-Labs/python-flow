@@ -1,8 +1,10 @@
 from decimal import Decimal
 
 from brownie.network.account import LocalAccount
+from ocean_lib.data_provider.data_service_provider import DataServiceProvider
 from ocean_lib.models.compute_input import ComputeInput
 from ocean_lib.ocean.ocean import Ocean
+from requests import PreparedRequest
 
 from feltflow.helpers import get_valid_until_time, pay_for_compute_service
 from feltflow.subgraph import get_access_details
@@ -89,23 +91,57 @@ class ComputeJob:
         self.state = "running"
 
     def check_status(self, account: LocalAccount) -> str:
+        assert self.state != "init", f"Compute job must be started first."
         status = self.ocean.compute.status(
             self.datasets[0], self.compute_service, self.job_id, account
         )
 
-        print("status", status)
+        if not status["ok"]:
+            self.state = "failed"
 
-        self.state = (
-            "finished" if Decimal(status.get("dateFinished", 0)) > 0 else "running"
-        )
+        elif status["status"] == 70:
+            self.state = "finished"
+            self.files = {
+                file["filename"]: (i, file) for i, file in enumerate(status["results"])
+            }
 
         return self.state
 
-    def get_outputs(self):
-        ...
+    def get_outputs(self) -> dict:
+        assert self.state == "finished", "Job must finish first before getting outputs"
+        return self.files
 
-    def get_file_url(self, file_name):
-        ...
+    def get_file_url(self, file_name: str, account: LocalAccount) -> str:
+        assert self.state == "finished", "Job must finish first before getting outputs"
 
-    def get_file(self, file_name):
-        ...
+        index = self.files[file_name][0]
+
+        # TODO: Probably will need function for custom nonce
+        nonce, signature = DataServiceProvider.sign_message(
+            account, f"{account.address}{self.job_id}{str(index)}"
+        )
+
+        req = PreparedRequest()
+        params = {
+            "signature": signature,
+            "nonce": nonce,
+            "jobId": self.job_id,
+            "index": index,
+            "consumerAddress": account.address,
+        }
+
+        (
+            _,
+            compute_job_result_endpoint,
+        ) = DataServiceProvider.build_compute_result_file_endpoint(
+            self.compute_service.service_endpoint
+        )
+        req.prepare_url(compute_job_result_endpoint, params)
+        return req.url
+
+    def get_file(self, file_name: str, account: LocalAccount):
+        assert self.state == "finished", "Job must finish first before getting outputs"
+        index = self.files[file_name][0]
+        return self.ocean.compute.result(
+            self.datasets[0], self.compute_service, self.job_id, index, account
+        )
