@@ -1,12 +1,17 @@
-from decimal import Decimal
+from datetime import datetime
+from typing import List, Optional, Tuple
 
 from brownie.network.account import LocalAccount
 from ocean_lib.data_provider.data_service_provider import DataServiceProvider
 from ocean_lib.models.compute_input import ComputeInput
 from ocean_lib.ocean.ocean import Ocean
+from ocean_lib.web3_internal.utils import sign_with_key
 from requests import PreparedRequest
+from web3.main import Web3
 
 from feltflow.helpers import get_valid_until_time, pay_for_compute_service
+from feltflow.ocean.data_service_provider import CustomDataServiceProvider
+from feltflow.ocean.ocean_compute import CustomOceanCompute
 from feltflow.subgraph import get_access_details
 
 
@@ -16,7 +21,7 @@ class ComputeJob:
     def __init__(
         self,
         ocean: Ocean,
-        dataset_dids: list[str],
+        dataset_dids: List[str],
         algorithm_did: str,
         algocustomdata: dict,
     ):
@@ -25,18 +30,34 @@ class ComputeJob:
         self.datasets = [ocean.assets.resolve(did) for did in dataset_dids]
         self.algorithm = ocean.assets.resolve(algorithm_did)
 
+        assert (
+            self.algorithm is not None
+        ), f"Couldn't resolve algorithm: {algorithm_did}"
+        for did, dataset in zip(dataset_dids, self.datasets):
+            assert dataset is not None, f"Couldn't resolve dataset: {did}"
+
+        self.ocean.compute = CustomOceanCompute(ocean.config)
+
         # TODO: Check service types and compatibility
         self.compute_service = self.datasets[0].services[0]
         self.algo_service = self.algorithm.services[0]
 
-        # TODO: Add better selection of compute environment
-        self.compute_env = ocean.compute.get_c2d_environments(
+        self.compute_env = ocean.compute.get_free_c2d_environment(
             self.compute_service.service_endpoint
-        )[0]
+        )
+
+        try:
+            self.compute_env = ocean.compute.get_free_c2d_environment(
+                self.compute_service.service_endpoint
+            )
+        except Exception:
+            self.compute_env = ocean.compute.get_c2d_environments(
+                self.compute_service.service_endpoint
+            )[0]
 
         self.state = "init"
 
-    def start(self, account: LocalAccount):
+    def start(self, account: LocalAccount, nonce: Optional[str] = None):
         assert self.state == "init", f"Compute job already in state {self.state}"
 
         # Add access details to dataset and algo DDOs
@@ -86,6 +107,7 @@ class ComputeJob:
             algorithm=algorithm,
             algorithm_algocustomdata=self.algocustomdata,
             additional_datasets=datasets[1:],
+            nonce=nonce,
         )
 
         self.state = "running"
@@ -111,14 +133,15 @@ class ComputeJob:
         assert self.state == "finished", "Job must finish first before getting outputs"
         return self.files
 
-    def get_file_url(self, file_name: str, account: LocalAccount) -> str:
+    def get_file_url(
+        self, file_name: str, account: LocalAccount, nonce: Optional[str] = None
+    ) -> str:
         assert self.state == "finished", "Job must finish first before getting outputs"
 
         index = self.files[file_name][0]
 
-        # TODO: Probably will need function for custom nonce
-        nonce, signature = DataServiceProvider.sign_message(
-            account, f"{account.address}{self.job_id}{str(index)}"
+        nonce, signature = CustomDataServiceProvider.sign_message(
+            account, f"{account.address}{self.job_id}{str(index)}", nonce
         )
 
         req = PreparedRequest()

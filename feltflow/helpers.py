@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta, timezone
-from typing import List, Union
+from typing import List, Tuple, Union
 
 from ocean_lib.data_provider.data_service_provider import DataServiceProvider
 from ocean_lib.models.compute_input import ComputeInput
@@ -23,9 +23,11 @@ def get_valid_until_time(
     return int((datetime.now(timezone.utc) + timedelta(minutes=min_time)).timestamp())
 
 
+# Later on there should be function from ocean.py:
+# https://github.com/oceanprotocol/ocean.py/blob/da7faf8ed841d1a65ab084ae3891b4f1ff41e2d7/ocean_lib/models/datatoken_base.py#L167
 def get_typed_datatoken(
     ocean: Ocean, token_address: str
-) -> Union[Datatoken, DatatokenEnterprise]:
+) -> Tuple[int, Union[Datatoken, DatatokenEnterprise]]:
     """Get datatoken class depending on datatoken id.
 
     Datatoken id:
@@ -33,9 +35,14 @@ def get_typed_datatoken(
         2 - DatatokneEnterprise
     """
     dt = Datatoken(ocean.config, token_address)
-    if dt.getId() == 2:
-        return DatatokenEnterprise(ocean.config, token_address)
-    return dt
+    try:
+        template_id = dt.getId()
+    except Exception:
+        template_id = 1
+
+    if template_id == 2:
+        dt = DatatokenEnterprise(ocean.config, token_address)
+    return template_id, dt
 
 
 def start_or_reuse_order_based_on_initialize_response(
@@ -49,14 +56,23 @@ def start_or_reuse_order_based_on_initialize_response(
     provider_fees = item.get("providerFee")
     valid_order = item.get("validOrder")
 
-    if valid_order and not provider_fees:
+    # TODO: Do the provider fees and approvals nicely
+    if valid_order and (not provider_fees or provider_fees["providerFeeAmount"] == "0"):
         asset_compute_input.transfer_tx_id = valid_order
         return
 
     service = asset_compute_input.service
-    dt = get_typed_datatoken(ocean, service.datatoken)
+    dt_id, dt = get_typed_datatoken(ocean, service.datatoken)
 
     if valid_order and provider_fees:
+        if provider_fees["providerFeeAmount"] != "0":
+            _, token = get_typed_datatoken(ocean, provider_fees["providerFeeToken"])
+            token.approve(
+                dt.address,
+                int(provider_fees["providerFeeAmount"]),
+                tx_dict,
+            )
+
         asset_compute_input.transfer_tx_id = dt.reuse_order(
             valid_order, provider_fees=provider_fees, tx_dict=tx_dict
         ).txid
@@ -78,10 +94,10 @@ def start_or_reuse_order_based_on_initialize_response(
             )
 
         # Run purchase depending on datatoken type
-        if dt.getId() == 2:
+        if dt_id == 2:
             if provider_fees:
                 if base_token.address != provider_fees["providerFeeToken"]:
-                    token = get_typed_datatoken(
+                    _, token = get_typed_datatoken(
                         ocean, provider_fees["providerFeeToken"]
                     )
                     token.approve(
@@ -126,6 +142,14 @@ def start_or_reuse_order_based_on_initialize_response(
             ).txid
 
     elif asset_compute_input.ddo.access_details["type"] == "free":
+        if provider_fees and provider_fees["providerFeeAmount"] != "0":
+            _, token = get_typed_datatoken(ocean, provider_fees["providerFeeToken"])
+            token.approve(
+                dt.address,
+                int(provider_fees["providerFeeAmount"]),
+                tx_dict,
+            )
+
         # TODO: For different types + approve fees to datatoken
         asset_compute_input.transfer_tx_id = dt.dispense_and_order(
             consumer=consumer_address,
@@ -160,6 +184,8 @@ def pay_for_compute_service(
         compute_environment,
         valid_until,
     )
+    print(datasets[0].__dict__)
+    print(algorithm_data.__dict__)
 
     result = initialize_response.json()
     for i, item in enumerate(result["datasets"]):
