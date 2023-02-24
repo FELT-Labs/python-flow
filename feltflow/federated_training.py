@@ -1,6 +1,6 @@
 import json
 import time
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from brownie.network.account import LocalAccount
 from ocean_lib.ocean.ocean import Ocean
@@ -29,7 +29,81 @@ class FederatedTraining:
         # Run this just to test compatibility of data and algorithms:
         self._local_jobs(self.algocustomdata)
 
-    def _local_jobs(self, algocustomdata: dict):
+    def latest_model(self, account: LocalAccount) -> Dict[str, Any]:
+        """Get the latest model from aggregation or return initial model.
+
+        Args:
+            account: account of user who started the training
+        """
+        if self.iterations_data:
+            data = self.iterations_data[-1]["aggregation"].get_file("model", account)
+            return json.loads(data.decode("utf-8"))
+
+        return self.algocustomdata
+
+    def run_aggregation(
+        self, local_trainings: List[ComputeJob], account: LocalAccount
+    ) -> ComputeJob:
+        """Run aggregation of provided local trainings.
+
+        Args:
+            local_trainings: list of local trainings to be aggregated
+            account: account used for aggregation
+
+        Returns:
+            new compute job of the aggregation
+        """
+        # Nonce trick - urls have higher nonce that compute job start
+        nonce = CustomDataServiceProvider.get_nonce()
+        url_nonce = str(nonce + 1000)
+
+        urls = [c.get_file_url("model", account, url_nonce) for c in local_trainings]
+        aggregation_data = {"model_urls": urls}
+
+        # Create aggregation job and start aggregation
+        aggregation = ComputeJob(
+            self.ocean,
+            [self.algorithm_config["emptyDataset"]],
+            self.algorithm_config["aggregation"],
+            aggregation_data,
+        )
+        aggregation.start(account, str(nonce))
+
+        return aggregation
+
+    def run(self, account: LocalAccount, iterations: int = 1) -> None:
+        """Run the federated training for specified number of iterations.
+
+        Args:
+            account: account used for starting the compute jobs
+            iterations: number of iterations to be executed
+        """
+        for _ in range(iterations):
+            # Get latest algocustomdata (model)
+            trainings = self._local_jobs(self.latest_model(account))
+            iteration = {
+                "training": trainings,
+                "aggregation": None,
+            }
+            self.iterations_data.append(iteration)
+
+            # Start local training
+            for compute in trainings:
+                compute.start(account)
+
+            # Wait for local training finish
+            self._wait_for_compute(trainings, account)
+
+            # Aggregation job and start aggregation
+            iteration["aggregation"] = self.run_aggregation(trainings, account)
+
+            # Wait for aggregation to finish
+            self._wait_for_compute([iteration["aggregation"]], account)
+
+            print("Finished with outputs:", iteration["aggregation"].get_outputs())
+            print(iteration["aggregation"].get_file("model", account))
+
+    def _local_jobs(self, algocustomdata: dict) -> List[ComputeJob]:
         """Initialize local training jobs for each dataset.
 
         Args:
@@ -45,55 +119,16 @@ class FederatedTraining:
             for did in self.dataset_dids
         ]
 
-    def latest_model(self, account):
-        """Get the latest model from aggregation or return initial model."""
-        if self.iterations_data:
-            data = self.iterations_data[-1]["aggregation"].get_file("model", account)
-            return json.loads(data.decode("utf-8"))
+    def _wait_for_compute(self, compute_jobs: List[ComputeJob], account: LocalAccount):
+        """Wait for all compute jobs to finish."""
+        while True:
+            stats = [c.check_status(account) for c in compute_jobs]
+            print("Stats", stats)
 
-        return self.algocustomdata
+            if any(map(lambda x: x == "failed", stats)):
+                raise Exception(f"Some compute job failed: {stats}")
 
-    def run(self, account: LocalAccount, iterations: int = 1):
-        for i in range(iterations):
-            # Get latest algocustomdata (model)
-            trainings = self._local_jobs(self.latest_model(account))
-            iteration = {
-                "training": trainings,
-                "aggregation": None,
-            }
-            self.iterations_data.append(iteration)
+            if all(map(lambda x: x == "finished", stats)):
+                break
 
-            # Start local training
-            for compute in trainings:
-                compute.start(account)
-
-            # Wait for local training finish
-            while True:
-                stats = [c.check_status(account) for c in trainings]
-                print("stats", stats)
-                if all(map(lambda x: x == "finished", stats)):
-                    break
-
-                if any(map(lambda x: x == "failed", stats)):
-                    raise Exception("Some local training failed")
-
-                time.sleep(5)
-
-            # Aggregate with nonce trick
-            nonce = CustomDataServiceProvider.get_nonce()
-            url_nonce = str(nonce + 1000)
-            urls = [c.get_file_url("model", account, url_nonce) for c in trainings]
-            aggregation_data = {"model_urls": urls}
-            # Aggregation job and start aggregation
-            iteration["aggregation"] = ComputeJob(
-                self.ocean,
-                [self.algorithm_config["emptyDataset"]],
-                self.algorithm_config["aggregation"],
-                aggregation_data,
-            )
-            iteration["aggregation"].start(account, str(nonce))
-            while iteration["aggregation"].check_status(account) != "finished":
-                time.sleep(5)
-
-            print("Finished with outputs:", iteration["aggregation"].get_outputs())
-            print(iteration["aggregation"].get_file("model", account))
+            time.sleep(5)

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from brownie.network.account import LocalAccount
 from ocean_lib.data_provider.data_service_provider import DataServiceProvider
@@ -9,9 +9,9 @@ from ocean_lib.web3_internal.utils import sign_with_key
 from requests import PreparedRequest
 from web3.main import Web3
 
-from feltflow.helpers import get_valid_until_time, pay_for_compute_service
 from feltflow.ocean.data_service_provider import CustomDataServiceProvider
 from feltflow.ocean.ocean_compute import CustomOceanCompute
+from feltflow.order import get_valid_until_time, pay_for_compute_service
 from feltflow.subgraph import get_access_details
 
 
@@ -57,7 +57,7 @@ class ComputeJob:
 
         self.state = "init"
 
-    def start(self, account: LocalAccount, nonce: Optional[str] = None):
+    def start(self, account: LocalAccount, nonce: Optional[str] = None) -> None:
         assert self.state == "init", f"Compute job already in state {self.state}"
 
         # Add access details to dataset and algo DDOs
@@ -83,12 +83,12 @@ class ComputeJob:
         )
 
         valid_unitl = get_valid_until_time(
-            self.compute_env["maxJobDuration"],
-            self.compute_service.timeout,
-            self.algo_service.timeout,
+            float(self.compute_env["maxJobDuration"]),
+            float(self.compute_service.timeout),
+            float(self.algo_service.timeout),
         )
 
-        # TODO: Possible speed up by allowing all spend for fixed exchange first
+        # TODO: Would be nice to batch all approve transactions into one
         datasets, algorithm = pay_for_compute_service(
             datasets=data_input,
             algorithm_data=algo_input,
@@ -162,7 +162,7 @@ class ComputeJob:
         req.prepare_url(compute_job_result_endpoint, params)
         return req.url
 
-    def get_file(self, file_name: str, account: LocalAccount):
+    def get_file(self, file_name: str, account: LocalAccount) -> Dict[str, Any]:
         assert self.state == "finished", "Job must finish first before getting outputs"
         index = self.files[file_name][0]
         return self.ocean.compute.result(

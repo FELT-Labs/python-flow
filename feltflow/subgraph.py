@@ -141,7 +141,7 @@ def get_access_details(
     service: Service,
     chain_id: str,
     account: str,
-):
+) -> Dict[str, Any]:
     datatoken_id = service.datatoken
     res = requests.post(
         f"{SUBGRAPH_URLS[chain_id]}/subgraphs/name/oceanprotocol/ocean-subgraph",

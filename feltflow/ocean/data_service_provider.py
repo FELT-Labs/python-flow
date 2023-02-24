@@ -27,7 +27,6 @@ class CustomDataServiceProvider(DataServiceProvider):
     def sign_message(wallet, msg: str, nonce: Optional[str] = None) -> Tuple[str, str]:
         if not nonce:
             nonce = str(CustomDataServiceProvider.get_nonce())
-        print(f"signing message with nonce {nonce}: {msg}, account={wallet.address}")
         message_hash = Web3.solidityKeccak(
             ["bytes"],
             [Web3.toBytes(text=f"{msg}{nonce}")],
@@ -187,3 +186,7 @@ class CustomDataServiceProvider(DataServiceProvider):
             payload["algorithm"] = algorithm_meta.as_dictionary()
 
         return payload
+
+
+# Fix the invalid signature (leave this until merged PR: https://github.com/oceanprotocol/ocean.py/pull/1307)
+DataServiceProvider.sign_message = CustomDataServiceProvider.sign_message

@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta, timezone
-from typing import List, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 from ocean_lib.data_provider.data_service_provider import DataServiceProvider
 from ocean_lib.models.compute_input import ComputeInput
@@ -7,6 +7,8 @@ from ocean_lib.models.datatoken import Datatoken, TokenFeeInfo
 from ocean_lib.models.datatoken_enterprise import DatatokenEnterprise
 from ocean_lib.ocean.ocean import Ocean
 from ocean_lib.ocean.util import get_address_of_type, to_wei
+
+from feltflow.approve import Approve
 
 
 def get_valid_until_time(
@@ -17,7 +19,7 @@ def get_valid_until_time(
     min_time = min(
         filter(
             lambda x: x != 0,
-            map(float, [max_job_duration, dataset_timeout, algorithm_timeout]),
+            [max_job_duration, dataset_timeout, algorithm_timeout],
         )
     )
     return int((datetime.now(timezone.utc) + timedelta(minutes=min_time)).timestamp())
@@ -45,34 +47,37 @@ def get_typed_datatoken(
     return template_id, dt
 
 
-def start_or_reuse_order_based_on_initialize_response(
+def _start_or_reuse_order_based_on_initialize_response(
     asset_compute_input: ComputeInput,
     item: dict,
     consume_market_fees: TokenFeeInfo,
     tx_dict: dict,
     consumer_address: str,
     ocean: Ocean,
-):
+) -> None:
     provider_fees = item.get("providerFee")
     valid_order = item.get("validOrder")
 
-    # TODO: Do the provider fees and approvals nicely
-    if valid_order and (not provider_fees or provider_fees["providerFeeAmount"] == "0"):
+    approvals = Approve()
+
+    # TODO: Here it depends on when was the order, if it is still valid we don't need to reuse order
+    # if valid_order and (not provider_fees or provider_fees["providerFeeAmount"] == "0"):
+    if valid_order and not provider_fees:
         asset_compute_input.transfer_tx_id = valid_order
         return
 
     service = asset_compute_input.service
     dt_id, dt = get_typed_datatoken(ocean, service.datatoken)
 
-    if valid_order and provider_fees:
-        if provider_fees["providerFeeAmount"] != "0":
-            _, token = get_typed_datatoken(ocean, provider_fees["providerFeeToken"])
-            token.approve(
-                dt.address,
-                int(provider_fees["providerFeeAmount"]),
-                tx_dict,
-            )
+    if provider_fees:
+        approvals.add_approve(
+            provider_fees["providerFeeToken"],
+            dt.address,
+            int(provider_fees["providerFeeAmount"]),
+        )
 
+    if valid_order and provider_fees:
+        approvals.appprove_all(ocean, tx_dict)
         asset_compute_input.transfer_tx_id = dt.reuse_order(
             valid_order, provider_fees=provider_fees, tx_dict=tx_dict
         ).txid
@@ -81,57 +86,37 @@ def start_or_reuse_order_based_on_initialize_response(
     # TODO: Add some requirements on extended DDO with access_details
     if asset_compute_input.ddo.access_details["type"] == "fixed":
         exchange = dt.get_exchanges()[0]
-
-        amt_needed = exchange.BT_needed(to_wei(1), consume_market_fees.amount)
-        base_token = Datatoken(exchange._FRE.config_dict, exchange.details.base_token)
-
-        base_token_balance = base_token.balanceOf(tx_dict["from"])
-        if base_token_balance < amt_needed:
-            raise ValueError(
-                f"Your token balance {base_token_balance} {base_token.symbol()} is not sufficient "
-                f"to execute the requested service. This service "
-                f"requires {amt_needed} {base_token.symbol()}."
-            )
+        amount_needed = exchange.BT_needed(to_wei(1), consume_market_fees.amount)
 
         # Run purchase depending on datatoken type
         if dt_id == 2:
-            if provider_fees:
-                if base_token.address != provider_fees["providerFeeToken"]:
-                    _, token = get_typed_datatoken(
-                        ocean, provider_fees["providerFeeToken"]
-                    )
-                    token.approve(
-                        dt.address,
-                        int(provider_fees["providerFeeAmount"]),
-                        tx_dict,
-                    )
-                else:
-                    amt_needed += int(provider_fees["providerFeeAmount"])
-
             # Approve base token for buying data token
-            base_token.approve(
+            approvals.add_approve(
+                exchange.details.base_token,
                 dt.address,
-                amt_needed,
-                tx_dict,
+                amount_needed,
             )
+            approvals.appprove_all(ocean, tx_dict)
+            total_amount = approvals.get_amount(exchange.details.base_token, dt.address)
 
             asset_compute_input.transfer_tx_id = dt.buy_DT_and_order(
                 consumer=consumer_address,
                 service_index=asset_compute_input.ddo.get_index_of_service(service),
                 provider_fees=provider_fees,
                 exchange=exchange,
-                max_base_token_amount=amt_needed,
+                max_base_token_amount=total_amount,
                 consume_market_swap_fee_amount=consume_market_fees.amount,
                 consume_market_swap_fee_address=consume_market_fees.address,
                 tx_dict=tx_dict,
             ).txid
         else:
             # Approve base token for buying data token
-            base_token.approve(
+            approvals.add_approve(
+                exchange.details.base_token,
                 exchange.address,
-                amt_needed,
-                tx_dict,
+                amount_needed,
             )
+            approvals.appprove_all(ocean, tx_dict)
 
             asset_compute_input.transfer_tx_id = dt.buy_DT_and_order(
                 consumer=consumer_address,
@@ -142,15 +127,8 @@ def start_or_reuse_order_based_on_initialize_response(
             ).txid
 
     elif asset_compute_input.ddo.access_details["type"] == "free":
-        if provider_fees and provider_fees["providerFeeAmount"] != "0":
-            _, token = get_typed_datatoken(ocean, provider_fees["providerFeeToken"])
-            token.approve(
-                dt.address,
-                int(provider_fees["providerFeeAmount"]),
-                tx_dict,
-            )
+        approvals.appprove_all(ocean, tx_dict)
 
-        # TODO: For different types + approve fees to datatoken
         asset_compute_input.transfer_tx_id = dt.dispense_and_order(
             consumer=consumer_address,
             service_index=asset_compute_input.ddo.get_index_of_service(service),
@@ -170,7 +148,7 @@ def pay_for_compute_service(
     tx_dict: dict,
     consumer_address: str,
     ocean: Ocean,
-):
+) -> Tuple[List[ComputeInput], Optional[ComputeInput]]:
     wallet_address = tx_dict["from"]
 
     if not consumer_address:
@@ -184,12 +162,10 @@ def pay_for_compute_service(
         compute_environment,
         valid_until,
     )
-    print(datasets[0].__dict__)
-    print(algorithm_data.__dict__)
 
     result = initialize_response.json()
     for i, item in enumerate(result["datasets"]):
-        start_or_reuse_order_based_on_initialize_response(
+        _start_or_reuse_order_based_on_initialize_response(
             datasets[i],
             item,
             TokenFeeInfo(
@@ -203,7 +179,7 @@ def pay_for_compute_service(
         )
 
     if "algorithm" in result:
-        start_or_reuse_order_based_on_initialize_response(
+        _start_or_reuse_order_based_on_initialize_response(
             algorithm_data,
             result["algorithm"],
             TokenFeeInfo(
