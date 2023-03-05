@@ -42,10 +42,6 @@ class ComputeJob:
         self.compute_service = self.datasets[0].services[0]
         self.algo_service = self.algorithm.services[0]
 
-        self.compute_env = ocean.compute.get_free_c2d_environment(
-            self.compute_service.service_endpoint
-        )
-
         try:
             self.compute_env = ocean.compute.get_free_c2d_environment(
                 self.compute_service.service_endpoint
