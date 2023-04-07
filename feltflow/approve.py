@@ -1,6 +1,6 @@
 from typing import Any, Dict
 
-from ocean_lib.models.datatoken import Datatoken
+from ocean_lib.models.datatoken1 import Datatoken1
 from ocean_lib.ocean.ocean import Ocean
 
 
@@ -49,7 +49,7 @@ class Approve:
             tx_dict: transaction config, must contain key {"from": account}
         """
         for token_address, transactions in self.approve.items():
-            token = Datatoken(ocean.config, token_address)
+            token = Datatoken1(ocean.config, token_address)
             for spender, amount in transactions.items():
                 if amount == 0:
                     continue
