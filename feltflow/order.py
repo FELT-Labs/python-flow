@@ -3,10 +3,9 @@ from typing import List, Optional, Tuple, Union
 
 from ocean_lib.data_provider.data_service_provider import DataServiceProvider
 from ocean_lib.models.compute_input import ComputeInput
-from ocean_lib.models.datatoken import Datatoken, TokenFeeInfo
-from ocean_lib.models.datatoken_enterprise import DatatokenEnterprise
+from ocean_lib.models.datatoken_base import DatatokenBase, TokenFeeInfo
 from ocean_lib.ocean.ocean import Ocean
-from ocean_lib.ocean.util import get_address_of_type, to_wei
+from ocean_lib.ocean.util import to_wei
 
 from feltflow.approve import Approve
 
@@ -23,28 +22,6 @@ def get_valid_until_time(
         )
     )
     return int((datetime.now(timezone.utc) + timedelta(minutes=min_time)).timestamp())
-
-
-# Later on there should be function from ocean.py:
-# https://github.com/oceanprotocol/ocean.py/blob/da7faf8ed841d1a65ab084ae3891b4f1ff41e2d7/ocean_lib/models/datatoken_base.py#L167
-def get_typed_datatoken(
-    ocean: Ocean, token_address: str
-) -> Tuple[int, Union[Datatoken, DatatokenEnterprise]]:
-    """Get datatoken class depending on datatoken id.
-
-    Datatoken id:
-        1 - Datatoken
-        2 - DatatokneEnterprise
-    """
-    dt = Datatoken(ocean.config, token_address)
-    try:
-        template_id = dt.getId()
-    except Exception:
-        template_id = 1
-
-    if template_id == 2:
-        dt = DatatokenEnterprise(ocean.config, token_address)
-    return template_id, dt
 
 
 def _start_or_reuse_order_based_on_initialize_response(
@@ -67,7 +44,7 @@ def _start_or_reuse_order_based_on_initialize_response(
         return
 
     service = asset_compute_input.service
-    dt_id, dt = get_typed_datatoken(ocean, service.datatoken)
+    dt = DatatokenBase.get_typed(ocean.config, service.datatoken)
 
     if provider_fees:
         approvals.add_approve(
@@ -89,7 +66,7 @@ def _start_or_reuse_order_based_on_initialize_response(
         amount_needed = exchange.BT_needed(to_wei(1), consume_market_fees.amount)
 
         # Run purchase depending on datatoken type
-        if dt_id == 2:
+        if dt.getId() == 2:
             # Approve base token for buying data token
             approvals.add_approve(
                 exchange.details.base_token,

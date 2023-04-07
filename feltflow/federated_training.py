@@ -1,12 +1,16 @@
 import json
 import time
+from datetime import datetime
 from typing import Any, Dict, List
 
 from brownie.network.account import LocalAccount
 from ocean_lib.ocean.ocean import Ocean
 
+from feltflow.cloud_storage import CloudStorage
 from feltflow.comput_job import ComputeJob
 from feltflow.ocean.data_service_provider import CustomDataServiceProvider
+
+# TODO: Add seeds
 
 
 class FederatedTraining:
@@ -15,14 +19,18 @@ class FederatedTraining:
     def __init__(
         self,
         ocean: Ocean,
+        storage: CloudStorage,
         dataset_dids: List[str],
-        algorithm_config: Dict[str, str],
+        algorithm_config: Dict[str, Any],
         algocustomdata: dict,
     ):
         self.ocean = ocean
+        self.storage = storage
         self.algocustomdata = algocustomdata
         self.dataset_dids = dataset_dids
         self.algorithm_config = algorithm_config
+        # TODO: Replace this with actual name as arg param
+        self.name = "dummy_name"
         self.nonce = None
 
         self.iterations_data = []
@@ -63,11 +71,20 @@ class FederatedTraining:
         # Create aggregation job and start aggregation
         aggregation = ComputeJob(
             self.ocean,
-            [self.algorithm_config["emptyDataset"]],
-            self.algorithm_config["aggregation"],
+            [self.algorithm_config["assets"]["emptyDataset"]],
+            self.algorithm_config["assets"]["aggregation"],
             aggregation_data,
         )
-        aggregation.start(account, str(nonce))
+        job_info = aggregation.start(account, str(nonce))
+
+        # Store job in FELT cloud
+        job_data = {
+            "computeJob": job_info,
+            "localTrainings": [c.did for c in local_trainings],
+        }
+        self.storage.update_user_job(
+            self.felt_job_id, f"aggregation.{self._timestamp()}", job_data
+        )
 
         return aggregation
 
@@ -79,6 +96,8 @@ class FederatedTraining:
             iterations: number of iterations to be executed
         """
         for _ in range(iterations):
+            # Store felt job in cloud storage
+            self.felt_job_id = self._create_felt_job(account)
             # Get latest algocustomdata (model)
             trainings = self._local_jobs(self.latest_model(account))
             iteration = {
@@ -89,7 +108,16 @@ class FederatedTraining:
 
             # Start local training
             for compute in trainings:
-                compute.start(account)
+                job_info = compute.start(account)
+
+                # Store job in FELT cloud
+                job_data = {
+                    "computeJob": job_info,
+                    "seed": 10,  # TODO: Seed
+                }
+                self.storage.update_user_job(
+                    self.felt_job_id, f"localTraining.{compute.did}", job_data
+                )
 
             # Wait for local training finish
             self._wait_for_compute(trainings, account)
@@ -113,7 +141,7 @@ class FederatedTraining:
             ComputeJob(
                 self.ocean,
                 [did],
-                self.algorithm_config["training"],
+                self.algorithm_config["assets"]["training"],
                 algocustomdata,
             )
             for did in self.dataset_dids
@@ -132,3 +160,25 @@ class FederatedTraining:
                 break
 
             time.sleep(5)
+
+    def _timestamp(self):
+        return int(datetime.now().timestamp() * 1000)
+
+    def _create_felt_job(self, account: LocalAccount) -> str:
+        timestamp = self._timestamp()
+        job_id = str(timestamp)
+
+        felt_job = {
+            "id": job_id,
+            "name": self.name,
+            "createdAt": timestamp,
+            "chainId": self.ocean.config_dict["chainId"],
+            "accountId": account.address,
+            "type": "multi",  # TODO: Add support for "solo" training as well
+            "dataDIDs": self.dataset_dids,
+            "algoConfig": self.algorithm_config,
+            "localTraining": {},
+            "aggregation": {},
+        }
+        self.storage.create_user_job(felt_job)
+        return job_id

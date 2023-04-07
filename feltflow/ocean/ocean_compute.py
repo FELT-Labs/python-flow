@@ -35,7 +35,7 @@ class CustomOceanCompute(OceanCompute):
         algorithm_algocustomdata: Optional[dict] = None,
         additional_datasets: List[ComputeInput] = [],
         nonce: Optional[str] = None,
-    ) -> str:
+    ) -> Dict[str, Any]:
         metadata_cache_uri = self._config_dict.get("METADATA_CACHE_URI")
         ddo = Aquarius.get_instance(metadata_cache_uri).get_ddo(dataset.did)
         service = ddo.get_service_by_id(dataset.service_id)
@@ -64,4 +64,4 @@ class CustomOceanCompute(OceanCompute):
             input_datasets=additional_datasets,
             nonce=nonce,
         )
-        return job_info["jobId"]
+        return job_info

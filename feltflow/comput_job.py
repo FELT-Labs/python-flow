@@ -27,6 +27,7 @@ class ComputeJob:
     ):
         self.ocean = ocean
         self.algocustomdata = algocustomdata
+        self.did = dataset_dids[0]
         self.datasets = [ocean.assets.resolve(did) for did in dataset_dids]
         self.algorithm = ocean.assets.resolve(algorithm_did)
 
@@ -42,13 +43,17 @@ class ComputeJob:
         self.compute_service = self.datasets[0].services[0]
         self.algo_service = self.algorithm.services[0]
 
+        self.chain_id = self.ocean.config_dict["chainId"]
+
         try:
             self.compute_env = ocean.compute.get_free_c2d_environment(
-                self.compute_service.service_endpoint
+                self.compute_service.service_endpoint,
+                self.chain_id,
             )
         except Exception:
             self.compute_env = ocean.compute.get_c2d_environments(
-                self.compute_service.service_endpoint
+                self.compute_service.service_endpoint,
+                self.chain_id,
             )[0]
 
         self.state = "init"
@@ -96,7 +101,7 @@ class ComputeJob:
             ocean=self.ocean,
         )
 
-        self.job_id = self.ocean.compute.start(
+        self.job_info = self.ocean.compute.start(
             consumer_wallet=account,
             dataset=datasets[0],
             compute_environment=self.compute_env["id"],
@@ -105,22 +110,26 @@ class ComputeJob:
             additional_datasets=datasets[1:],
             nonce=nonce,
         )
+        self.job_id = self.job_info["jobId"]
 
         self.state = "running"
 
+        return self.job_info
+
     def check_status(self, account: LocalAccount) -> str:
         assert self.state != "init", f"Compute job must be started first."
-        status = self.ocean.compute.status(
+        self.job_info = self.ocean.compute.status(
             self.datasets[0], self.compute_service, self.job_id, account
         )
 
-        if not status["ok"]:
+        if not self.job_info["ok"]:
             self.state = "failed"
 
-        elif status["status"] == 70:
+        elif self.job_info["status"] == 70:
             self.state = "finished"
             self.files = {
-                file["filename"]: (i, file) for i, file in enumerate(status["results"])
+                file["filename"]: (i, file)
+                for i, file in enumerate(self.job_info["results"])
             }
 
         return self.state
