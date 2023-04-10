@@ -2,16 +2,15 @@ import logging
 import os
 import time
 
+from feltflow.cloud_storage import CloudStorage
+
 # Turn off info logging (must be before ocean_lib imports)
 logging.basicConfig(level=logging.ERROR)
 
 from brownie.network import accounts
 from dotenv import load_dotenv
-from ocean_lib.example_config import get_config_dict
-from ocean_lib.ocean.ocean import Ocean
-from ocean_lib.web3_internal.utils import connect_to_network
 
-from feltflow.comput_job import ComputeJob
+from feltflow.config import get_ocean
 from feltflow.federated_training import FederatedTraining
 
 load_dotenv()
@@ -23,9 +22,11 @@ load_dotenv()
 
 def main():
     # Create Ocean instance
-    connect_to_network("polygon-test")  # mumbai is "polygon-test"
-    config = get_config_dict("polygon-test")
-    ocean = Ocean(config)
+    ocean = get_ocean(80001)
+    storage = CloudStorage(
+        "http://localhost:3000",
+        os.getenv("SESSION"),  # TODO: Replace with call param
+    )
 
     # Create Alice's wallet
     account = accounts.add(os.getenv("PRIVATE_KEY"))
@@ -47,12 +48,19 @@ def main():
     ]
 
     algo_config = {
-        "training": "did:op:87e58362dfc60bbeaf83d5495e587a891a9ca697a6c5ec3585bfe1f8586f85fa",
-        "aggregation": "did:op:dcefb784c302094251ae1bc19d898eb584bd7be20a623bab078d4df0283e6c79",
-        "emptyDataset": "did:op:20bf68f480e17aff3e6947792e75b615908a46394ba33c8cfb94587a0a8d2c29",
+        "id": "FELT",
+        "name": "FELT Federated Training",
+        "assets": {
+            "training": "did:op:87e58362dfc60bbeaf83d5495e587a891a9ca697a6c5ec3585bfe1f8586f85fa",
+            "aggregation": "did:op:dcefb784c302094251ae1bc19d898eb584bd7be20a623bab078d4df0283e6c79",
+            "emptyDataset": "did:op:20bf68f480e17aff3e6947792e75b615908a46394ba33c8cfb94587a0a8d2c29",
+        },
+        "hasParameters": True,
     }
 
-    federated_training = FederatedTraining(ocean, dids, algo_config, algocustomdata)
+    federated_training = FederatedTraining(
+        ocean, storage, dids, algo_config, algocustomdata
+    )
     federated_training.run(account, iterations=1)
 
     ## TEST DIDs
