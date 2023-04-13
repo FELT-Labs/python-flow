@@ -20,6 +20,7 @@ class FederatedTraining:
         self,
         ocean: Ocean,
         storage: CloudStorage,
+        name: str,
         dataset_dids: List[str],
         algorithm_config: Dict[str, Any],
         algocustomdata: dict,
@@ -29,8 +30,7 @@ class FederatedTraining:
         self.algocustomdata = algocustomdata
         self.dataset_dids = dataset_dids
         self.algorithm_config = algorithm_config
-        # TODO: Replace this with actual name as arg param
-        self.name = "dummy_name"
+        self.name = name
         self.nonce = None
 
         self.iterations_data = []
