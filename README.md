@@ -62,3 +62,8 @@ Do following steps when updating to new version:
    git push origin v0.0.0
    ```
 3. Create new release on Github based on tag
+
+## Potential issues
+### Error while running `pip install .`
+There might be some issues with installing `ocean-lib` package. Mainly on mac M1 problems with installing `wheel` or `coincurve`
+Workaround is explained here https://github.com/oceanprotocol/ocean.py/blob/main/READMEs/install.md
