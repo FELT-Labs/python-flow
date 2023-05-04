@@ -55,7 +55,7 @@ requirements = parse_requirements(PATH / "requirements.txt")
 
 setup(
     name="feltflow",
-    version="0.1.0",
+    version="0.2.0",
     packages=find_packages(),
     maintainer="FELT Labs",
     maintainer_email="support@feltlabs.ai",
