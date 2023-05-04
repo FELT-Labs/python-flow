@@ -53,7 +53,7 @@ class CustomOceanCompute(OceanCompute):
             raise AssetNotConsumable(consumable_result)
 
         # Start compute job
-        job_info = self._data_provider.start_compute_job(
+        job_info, auth_token = self._data_provider.start_compute_job(
             dataset_compute_service=service,
             consumer=consumer_wallet,
             dataset=dataset,
@@ -64,4 +64,4 @@ class CustomOceanCompute(OceanCompute):
             input_datasets=additional_datasets,
             nonce=nonce,
         )
-        return job_info
+        return job_info, auth_token

@@ -75,11 +75,12 @@ class FederatedTraining:
             self.algorithm_config["assets"]["aggregation"],
             aggregation_data,
         )
-        job_info = aggregation.start(account, str(nonce))
+        job_info, auth_token = aggregation.start(account, str(nonce))
 
         # Store job in FELT cloud
         job_data = {
             "computeJob": job_info,
+            "authToken": auth_token,
             "localTrainings": [c.did for c in local_trainings],
         }
         self.storage.update_user_job(
@@ -108,11 +109,12 @@ class FederatedTraining:
 
             # Start local training
             for compute in trainings:
-                job_info = compute.start(account)
+                job_info, auth_token = compute.start(account)
 
                 # Store job in FELT cloud
                 job_data = {
                     "computeJob": job_info,
+                    "authToken": auth_token,
                     "seed": 10,  # TODO: Seed
                 }
                 self.storage.update_user_job(

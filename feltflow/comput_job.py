@@ -58,7 +58,9 @@ class ComputeJob:
 
         self.state = "init"
 
-    def start(self, account: LocalAccount, nonce: Optional[str] = None) -> None:
+    def start(
+        self, account: LocalAccount, nonce: Optional[str] = None
+    ) -> Tuple[dict, str]:
         assert self.state == "init", f"Compute job already in state {self.state}"
 
         # Add access details to dataset and algo DDOs
@@ -101,7 +103,7 @@ class ComputeJob:
             ocean=self.ocean,
         )
 
-        self.job_info = self.ocean.compute.start(
+        self.job_info, self.auth_token = self.ocean.compute.start(
             consumer_wallet=account,
             dataset=datasets[0],
             compute_environment=self.compute_env["id"],
@@ -114,7 +116,7 @@ class ComputeJob:
 
         self.state = "running"
 
-        return self.job_info
+        return self.job_info, self.auth_token
 
     def check_status(self, account: LocalAccount) -> str:
         assert self.state != "init", f"Compute job must be started first."
@@ -140,18 +142,16 @@ class ComputeJob:
 
     def get_file_url(
         self, file_name: str, account: LocalAccount, nonce: Optional[str] = None
-    ) -> str:
+    ) -> dict:
         assert self.state == "finished", "Job must finish first before getting outputs"
 
         index = self.files[file_name][0]
 
-        nonce, signature = CustomDataServiceProvider.sign_message(
-            account, f"{account.address}{self.job_id}{str(index)}", nonce
-        )
+        if not nonce:
+            nonce = str(CustomDataServiceProvider.get_nonce())
 
         req = PreparedRequest()
         params = {
-            "signature": signature,
             "nonce": nonce,
             "jobId": self.job_id,
             "index": index,
@@ -165,7 +165,12 @@ class ComputeJob:
             self.compute_service.service_endpoint
         )
         req.prepare_url(compute_job_result_endpoint, params)
-        return req.url
+        return {
+            "url": req.url,
+            "headers": {
+                "AuthToken": self.auth_token,
+            },
+        }
 
     def get_file(self, file_name: str, account: LocalAccount) -> Dict[str, Any]:
         assert self.state == "finished", "Job must finish first before getting outputs"
