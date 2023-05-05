@@ -1,7 +1,8 @@
 import json
+import os
 import time
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 from brownie.network.account import LocalAccount
 from ocean_lib.ocean.ocean import Ocean
@@ -45,7 +46,9 @@ class FederatedTraining:
         """
         if self.iterations_data:
             data = self.iterations_data[-1]["aggregation"].get_file("model", account)
-            return json.loads(data.decode("utf-8"))
+            model = json.loads(data.decode("utf-8"))
+            model["seeds"] = self.iterations_data[-1]["seeds"]
+            return model
 
         return self.algocustomdata
 
@@ -98,22 +101,23 @@ class FederatedTraining:
             # Store felt job in cloud storage
             self.felt_job_id = self._create_felt_job(account)
             # Get latest algocustomdata (model)
-            trainings = self._local_jobs(self.latest_model(account))
+            trainings, seeds = self._local_jobs(self.latest_model(account))
             iteration = {
                 "training": trainings,
+                "seeds": seeds,
                 "aggregation": None,
             }
             self.iterations_data.append(iteration)
 
             # Start local training
-            for compute in trainings:
+            for compute, seed in zip(trainings, seeds):
                 job_info, auth_token = compute.start(account)
 
                 # Store job in FELT cloud
                 job_data = {
                     "computeJob": job_info,
                     "authToken": auth_token,
-                    "seed": 10,  # TODO: Seed
+                    "seed": seed,
                 }
                 self.storage.update_job(f"localTraining.{compute.did}", job_data)
 
@@ -129,21 +133,25 @@ class FederatedTraining:
             print("Finished with outputs:", iteration["aggregation"].get_outputs())
             print(iteration["aggregation"].get_file("model", account))
 
-    def _local_jobs(self, algocustomdata: dict) -> List[ComputeJob]:
+    def _local_jobs(self, algocustomdata: dict) -> Tuple[List[ComputeJob], List[int]]:
         """Initialize local training jobs for each dataset.
 
         Args:
             algocustomdata: model definition used for local training
         """
-        return [
-            ComputeJob(
-                self.ocean,
-                [did],
-                self.algorithm_config["assets"]["training"],
-                algocustomdata,
+        seeds = [self._get_seed() for _ in self.dataset_dids]
+        jobs = []
+        for did, seed in zip(self.dataset_dids, seeds):
+            algocustomdata["seed"] = seed
+            jobs.append(
+                ComputeJob(
+                    self.ocean,
+                    [did],
+                    self.algorithm_config["assets"]["training"],
+                    algocustomdata,
+                )
             )
-            for did in self.dataset_dids
-        ]
+        return jobs, seeds
 
     def _wait_for_compute(self, compute_jobs: List[ComputeJob], account: LocalAccount):
         """Wait for all compute jobs to finish."""
@@ -180,3 +188,6 @@ class FederatedTraining:
         }
         self.storage.create_job(felt_job)
         return job_id
+
+    def _get_seed(self) -> int:
+        return int.from_bytes(os.urandom(1), "big")
