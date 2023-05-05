@@ -9,34 +9,41 @@ class CloudStorage:
     Code is following the javascript API definition.
     """
 
-    def __init__(self, api_base_url: str, user_token: str):
-        self.endpoint = f"{api_base_url}/api/jobs"
-        self.token = user_token
+    def __init__(self, api_base_url: str, launch_token: str):
+        self.endpoint = f"{api_base_url}/api/python-flow/jobs"
         self.headers = {"Content-Type": "application/json"}
-        self.cookies = {"next-auth.session-token": user_token}
+        self.launch_token = launch_token
 
     def _stringify(self, data: dict) -> str:
         """Turn dictionary into JSON string."""
         return json.dumps(data, separators=(",", ":"))
 
     def _fetch(self, method: str, data: str) -> requests.Response:
-        """Send request to FELT API with appropriate headers and cookies."""
-        return requests.request(
-            method, self.endpoint, data=data, headers=self.headers, cookies=self.cookies
+        """Send request to FELT API with appropriate headers."""
+        response = requests.request(
+            method, self.endpoint, data=data, headers=self.headers
         )
+        if not response.ok:
+            raise Exception("Failed to store/update job in cloud storage.")
 
-    def create_user_job(self, job: dict) -> requests.Response:
+        return response
+
+    def get_job(self) -> dict:
+        res = requests.request(
+            "GET", f"{self.endpoint}?launchToken={self.launch_token}"
+        )
+        return res.json()
+
+    def create_job(self, job: dict) -> requests.Response:
         """Store new job through API into the FELT Labs storage."""
-        data = self._stringify({"job": job})
-        return self._fetch("PUT", data)
+        data = self._stringify({"launchToken": self.launch_token, "job": job})
+        return self._fetch("POST", data)
 
-    def update_user_job(
-        self, job_id: str, update_field: str, update_value: Any
-    ) -> requests.Response:
+    def update_job(self, update_field: str, update_value: Any) -> requests.Response:
         """Update job from FELT Labs storage through API."""
         data = self._stringify(
             {
-                "jobId": job_id,
+                "launchToken": self.launch_token,
                 "updateField": update_field,
                 "updateValue": update_value,
             }

@@ -115,7 +115,6 @@ class CustomDataServiceProvider(DataServiceProvider):
         _, compute_endpoint = DataServiceProvider.build_compute_endpoint(
             dataset_compute_service.service_endpoint
         )
-        print("Payload", payload)
         response = DataServiceProvider._http_method(
             "post",
             compute_endpoint,

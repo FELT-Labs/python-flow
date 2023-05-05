@@ -83,9 +83,7 @@ class FederatedTraining:
             "authToken": auth_token,
             "localTrainings": [c.did for c in local_trainings],
         }
-        self.storage.update_user_job(
-            self.felt_job_id, f"aggregation.{self._timestamp()}", job_data
-        )
+        self.storage.update_job(f"aggregation.{self._timestamp()}", job_data)
 
         return aggregation
 
@@ -117,9 +115,7 @@ class FederatedTraining:
                     "authToken": auth_token,
                     "seed": 10,  # TODO: Seed
                 }
-                self.storage.update_user_job(
-                    self.felt_job_id, f"localTraining.{compute.did}", job_data
-                )
+                self.storage.update_job(f"localTraining.{compute.did}", job_data)
 
             # Wait for local training finish
             self._wait_for_compute(trainings, account)
@@ -182,5 +178,5 @@ class FederatedTraining:
             "localTraining": {},
             "aggregation": {},
         }
-        self.storage.create_user_job(felt_job)
+        self.storage.create_job(felt_job)
         return job_id

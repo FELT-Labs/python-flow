@@ -25,11 +25,7 @@ load_dotenv()
 
 @dataclass
 class Config:
-    name: str
-    chain_id: int
-    dids: List[str]
-    algo_config: dict
-    session: str
+    launch_token: str
     api_endpoint: str
     algocustomdata: dict = field(default_factory=dict)
 
@@ -60,34 +56,10 @@ def _parse_training_args(args_str: Optional[List[str]] = None) -> Config:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
-        "--name",
+        "--launch_token",
         type=str,
         required=True,
         help="Name used for identifying the training.",
-    )
-    parser.add_argument(
-        "--chain_id",
-        type=int,
-        required=True,
-        help="Blockchain id identifying correct blockchain",
-    )
-    parser.add_argument(
-        "--dids",
-        type=lambda s: s.split(","),
-        required=True,
-        help="List of data DIDs split by comma (,)",
-    )
-    parser.add_argument(
-        "--algo_config",
-        type=lambda s: json.loads(s),
-        required=True,
-        help="Algorithm config passed as string representing JSON.",
-    )
-    parser.add_argument(
-        "--session",
-        type=str,
-        required=True,
-        help="User session cookie used for storing jobs in cloud storage",
     )
     parser.add_argument(
         "--algocustomdata",
@@ -110,20 +82,28 @@ def main(config: Optional[Config] = None, args_str: Optional[List[str]] = None) 
     if config is None:
         config = _parse_training_args(args_str)
 
-    ocean = get_ocean(config.chain_id)
-    storage = CloudStorage(config.api_endpoint, config.session)
+    storage = CloudStorage(config.api_endpoint, config.launch_token)
+    job = storage.get_job()
+
+    if job["jobId"] is not None:
+        raise Exception(
+            f"Job with launch token {config.launch_token} was already started."
+        )
+
+    ocean = get_ocean(job["chainId"])
+    account = accounts.add(os.getenv("PRIVATE_KEY"))
 
     print("FELT Labs: Starting training")
-    account = accounts.add(os.getenv("PRIVATE_KEY"))
-    print("Using account:", account.address)
-    print("    Account balance:", account.balance())
+    print(f"  Chain ID: {job['chainId']}")
+    print(f"  Using account: {account.address}")
+    print(f"    Account balance: {account.balance()}")
 
     federated_training = FederatedTraining(
         ocean,
         storage,
-        config.name,
-        config.dids,
-        config.algo_config,
-        config.algocustomdata,
+        job["name"],
+        job["dataDIDs"],
+        job["algoConfig"],
+        job["algoCustomData"],
     )
     federated_training.run(account, iterations=1)
