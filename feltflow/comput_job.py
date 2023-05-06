@@ -175,6 +175,7 @@ class ComputeJob:
     def get_file(self, file_name: str, account: LocalAccount) -> Dict[str, Any]:
         assert self.state == "finished", "Job must finish first before getting outputs"
         index = self.files[file_name][0]
+        # TODO: Use ocean auth token instead
         return self.ocean.compute.result(
             self.datasets[0], self.compute_service, self.job_id, index, account
         )

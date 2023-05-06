@@ -26,12 +26,15 @@ class FederatedTraining:
         algorithm_config: Dict[str, Any],
         algocustomdata: dict,
     ):
+        assert len(dataset_dids) >= 1, "No datasets provided for training"
+
         self.ocean = ocean
         self.storage = storage
         self.algocustomdata = algocustomdata
         self.dataset_dids = dataset_dids
         self.algorithm_config = algorithm_config
         self.name = name
+        self.type = "solo" if len(dataset_dids) == 1 else "multi"
         self.nonce = None
 
         self.iterations_data = []
@@ -45,9 +48,10 @@ class FederatedTraining:
             account: account of user who started the training
         """
         if self.iterations_data:
-            data = self.iterations_data[-1]["aggregation"].get_file("model", account)
+            data = self.iterations_data[-1]["final_job"].get_file("model", account)
             model = json.loads(data.decode("utf-8"))
-            model["seeds"] = self.iterations_data[-1]["seeds"]
+            if self.type == "multi":
+                model["seeds"] = self.iterations_data[-1]["seeds"]
             return model
 
         return self.algocustomdata
@@ -106,6 +110,7 @@ class FederatedTraining:
                 "training": trainings,
                 "seeds": seeds,
                 "aggregation": None,
+                "final_job": None,
             }
             self.iterations_data.append(iteration)
 
@@ -124,14 +129,18 @@ class FederatedTraining:
             # Wait for local training finish
             self._wait_for_compute(trainings, account)
 
-            # Aggregation job and start aggregation
-            iteration["aggregation"] = self.run_aggregation(trainings, account)
+            if self.type == "multi":
+                # Aggregation job and start aggregation
+                iteration["aggregation"] = self.run_aggregation(trainings, account)
+                # Wait for aggregation to finish
+                self._wait_for_compute([iteration["aggregation"]], account)
+                iteration["final_job"] = iteration["aggregation"]
+            else:
+                iteration["final_job"] = iteration["training"][0]
 
-            # Wait for aggregation to finish
-            self._wait_for_compute([iteration["aggregation"]], account)
-
-            print("Finished with outputs:", iteration["aggregation"].get_outputs())
-            print(iteration["aggregation"].get_file("model", account))
+            print("Finished with outputs:")
+            print(iteration["final_job"].get_outputs())
+            print("Model data:\n", self.latest_model(account))
 
     def _local_jobs(self, algocustomdata: dict) -> Tuple[List[ComputeJob], List[int]]:
         """Initialize local training jobs for each dataset.
@@ -167,9 +176,6 @@ class FederatedTraining:
 
             time.sleep(5)
 
-    def _timestamp(self):
-        return int(datetime.now().timestamp() * 1000)
-
     def _create_felt_job(self, account: LocalAccount) -> str:
         timestamp = self._timestamp()
         job_id = str(timestamp)
@@ -180,7 +186,7 @@ class FederatedTraining:
             "createdAt": timestamp,
             "chainId": self.ocean.config_dict["chainId"],
             "accountId": account.address,
-            "type": "multi",  # TODO: Add support for "solo" training as well
+            "type": self.type,
             "dataDIDs": self.dataset_dids,
             "algoConfig": self.algorithm_config,
             "localTraining": {},
@@ -189,5 +195,8 @@ class FederatedTraining:
         self.storage.create_job(felt_job)
         return job_id
 
+    def _timestamp(self):
+        return int(datetime.now().timestamp() * 1000)
+
     def _get_seed(self) -> int:
-        return int.from_bytes(os.urandom(1), "big")
+        return int.from_bytes(os.urandom(1), "big") if self.type == "multi" else 0

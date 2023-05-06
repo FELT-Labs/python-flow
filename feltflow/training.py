@@ -107,3 +107,5 @@ def main(config: Optional[Config] = None, args_str: Optional[List[str]] = None) 
         job["algoCustomData"],
     )
     federated_training.run(account, iterations=1)
+
+    print(f"Training finished! View the results at: {config.api_endpoint}/jobs")
