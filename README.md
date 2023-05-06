@@ -27,14 +27,9 @@ After that you should be ready for running FELT Flow.
 ## Examples
 Example command line for running FELT Flow:
 ```bash
-felt-flow --chain_id 80001 \
-   --name "Training name" \
-   --dids 'did:op:3632e8584837f2eac04d85466c0cebd8b8cb2673b472a82a310175da9730042a,did:op:cad4a81c9a8e1c1071ccf3e9dea6f8f42d58e100fa3ddf2950c8f0da9e0dda46' \
-   --algo_config '{"id":"FELT","name":"FELT Federated Training","assets":{"training":"did:op:87e58362dfc60bbeaf83d5495e587a891a9ca697a6c5ec3585bfe1f8586f85fa","aggregation":"did:op:dcefb784c302094251ae1bc19d898eb584bd7be20a623bab078d4df0283e6c79","emptyDataset":"did:op:20bf68f480e17aff3e6947792e75b615908a46394ba33c8cfb94587a0a8d2c29"},"hasParameters":true}' \
-   --algocustomdata '{"model_definition":{"model_name":"LinearRegression","model_type":"sklearn"},"data_type":"csv","target_column":-1}' \
-   --session <exported_session-token_cookie> \
-   --api_endpoint "https://app.feltlabs.ai"
+felt-flow --launch_token <launch_token_from_feltlabs_app>
 ```
+This token is obtained through our web application: [app.feltlabs.ai](https://app.feltlabs.ai).
 
 
 ## Development

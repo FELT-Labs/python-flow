@@ -104,7 +104,7 @@ def main(config: Optional[Config] = None, args_str: Optional[List[str]] = None) 
         job["name"],
         job["dataDIDs"],
         job["algoConfig"],
-        job["algoCustomData"],
+        job["algoCustomData"] if not config.algocustomdata else config.algocustomdata,
     )
     federated_training.run(account, iterations=1)
 
