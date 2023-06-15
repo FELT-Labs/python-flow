@@ -9,9 +9,8 @@ from ocean_lib.ocean.ocean import Ocean
 
 from feltflow.cloud_storage import CloudStorage
 from feltflow.comput_job import ComputeJob
+from feltflow.cryptography import encrypt_nacl
 from feltflow.ocean.data_service_provider import CustomDataServiceProvider
-
-# TODO: Add seeds
 
 
 class FederatedTraining:
@@ -21,6 +20,7 @@ class FederatedTraining:
         self,
         ocean: Ocean,
         storage: CloudStorage,
+        public_key: str,
         name: str,
         dataset_dids: List[str],
         algorithm_config: Dict[str, Any],
@@ -30,6 +30,7 @@ class FederatedTraining:
 
         self.ocean = ocean
         self.storage = storage
+        self.public_key = public_key
         self.algocustomdata = algocustomdata
         self.dataset_dids = dataset_dids
         self.algorithm_config = algorithm_config
@@ -87,7 +88,7 @@ class FederatedTraining:
         # Store job in FELT cloud
         job_data = {
             "computeJob": job_info,
-            "authToken": auth_token,
+            "authToken": encrypt_nacl(auth_token, self.public_key),
             "localTrainings": [c.did for c in local_trainings],
         }
         self.storage.update_job(f"aggregation.{self._timestamp()}", job_data)
@@ -121,7 +122,7 @@ class FederatedTraining:
                 # Store job in FELT cloud
                 job_data = {
                     "computeJob": job_info,
-                    "authToken": auth_token,
+                    "authToken": encrypt_nacl(auth_token, self.public_key),
                     "seed": seed,
                 }
                 self.storage.update_job(f"localTraining.{compute.did}", job_data)
