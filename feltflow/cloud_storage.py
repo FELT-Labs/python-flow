@@ -1,5 +1,5 @@
 import json
-from typing import Any
+from typing import Any, List
 
 import requests
 
@@ -10,7 +10,7 @@ class CloudStorage:
     """
 
     def __init__(self, api_base_url: str, launch_token: str):
-        self.endpoint = f"{api_base_url}/api/python-flow/jobs"
+        self.api_base_url = api_base_url
         self.headers = {"Content-Type": "application/json"}
         self.launch_token = launch_token
 
@@ -18,10 +18,10 @@ class CloudStorage:
         """Turn dictionary into JSON string."""
         return json.dumps(data, separators=(",", ":"))
 
-    def _fetch(self, method: str, data: str) -> requests.Response:
+    def _fetch(self, endpoint: str, method: str, data: str) -> requests.Response:
         """Send request to FELT API with appropriate headers."""
         response = requests.request(
-            method, self.endpoint, data=data, headers=self.headers
+            method, f"{self.api_base_url}{endpoint}", data=data, headers=self.headers
         )
         if not response.ok:
             raise Exception("Failed to store/update job in cloud storage.")
@@ -30,22 +30,52 @@ class CloudStorage:
 
     def get_job(self) -> dict:
         res = requests.request(
-            "GET", f"{self.endpoint}?launchToken={self.launch_token}"
+            "GET",
+            f"{self.api_base_url}/api/python-flow/jobs?launchToken={self.launch_token}",
         )
         return res.json()
 
-    def create_job(self, job: dict) -> requests.Response:
+    def create_job(self) -> requests.Response:
         """Store new job through API into the FELT Labs storage."""
-        data = self._stringify({"launchToken": self.launch_token, "job": job})
-        return self._fetch("POST", data)
+        data = self._stringify({"launchToken": self.launch_token})
+        return self._fetch("/api/python-flow/jobs", "POST", data)
 
-    def update_job(self, update_field: str, update_value: Any) -> requests.Response:
-        """Update job from FELT Labs storage through API."""
+    def add_aggregation(
+        self,
+        round: str,
+        authToken: str,
+        localTrainingsIds: List[str],
+        computeJob: dict,
+    ) -> requests.Response:
+        """Store new local training through API into the FELT Labs storage."""
         data = self._stringify(
             {
                 "launchToken": self.launch_token,
-                "updateField": update_field,
-                "updateValue": update_value,
+                "round": round,
+                "authToken": authToken,
+                "localTrainingsIds": localTrainingsIds,
+                "computeJob": computeJob,
             }
         )
-        return self._fetch("PATCH", data)
+        return self._fetch("/api/python-flow/jobs/aggregation", "POST", data)
+
+    def add_local_training(
+        self,
+        round: str,
+        seed: int,
+        authToken: str,
+        dataDid: str,
+        computeJob: dict,
+    ) -> requests.Response:
+        """Store new aggregation through API into the FELT Labs storage."""
+        data = self._stringify(
+            {
+                "launchToken": self.launch_token,
+                "round": round,
+                "seed": seed,
+                "authToken": authToken,
+                "dataDid": dataDid,
+                "computeJob": computeJob,
+            }
+        )
+        return self._fetch("/api/python-flow/jobs/localTraining", "POST", data)
