@@ -101,6 +101,7 @@ def main(config: Optional[Config] = None, args_str: Optional[List[str]] = None) 
     federated_training = FederatedTraining(
         ocean,
         storage,
+        job["publicKey"],
         job["name"],
         job["dataDIDs"],
         job["algoConfig"],

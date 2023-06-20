@@ -9,9 +9,8 @@ from ocean_lib.ocean.ocean import Ocean
 
 from feltflow.cloud_storage import CloudStorage
 from feltflow.comput_job import ComputeJob
+from feltflow.cryptography import encrypt_nacl
 from feltflow.ocean.data_service_provider import CustomDataServiceProvider
-
-# TODO: Add seeds
 
 
 class FederatedTraining:
@@ -21,6 +20,7 @@ class FederatedTraining:
         self,
         ocean: Ocean,
         storage: CloudStorage,
+        public_key: str,
         name: str,
         dataset_dids: List[str],
         algorithm_config: Dict[str, Any],
@@ -30,6 +30,7 @@ class FederatedTraining:
 
         self.ocean = ocean
         self.storage = storage
+        self.public_key = public_key
         self.algocustomdata = algocustomdata
         self.dataset_dids = dataset_dids
         self.algorithm_config = algorithm_config
@@ -57,7 +58,7 @@ class FederatedTraining:
         return self.algocustomdata
 
     def run_aggregation(
-        self, local_trainings: List[ComputeJob], account: LocalAccount
+        self, round: str, local_trainings: List[ComputeJob], account: LocalAccount
     ) -> ComputeJob:
         """Run aggregation of provided local trainings.
 
@@ -85,12 +86,12 @@ class FederatedTraining:
         job_info, auth_token = aggregation.start(account, str(nonce))
 
         # Store job in FELT cloud
-        job_data = {
-            "computeJob": job_info,
-            "authToken": auth_token,
-            "localTrainings": [c.did for c in local_trainings],
-        }
-        self.storage.update_job(f"aggregation.{self._timestamp()}", job_data)
+        self.storage.add_aggregation(
+            round,
+            encrypt_nacl(auth_token, self.public_key),
+            [c.did for c in local_trainings],
+            job_info,
+        )
 
         return aggregation
 
@@ -101,9 +102,10 @@ class FederatedTraining:
             account: account used for starting the compute jobs
             iterations: number of iterations to be executed
         """
-        for _ in range(iterations):
-            # Store felt job in cloud storage
-            self.felt_job_id = self._create_felt_job(account)
+        # Init job in FELT storage
+        self.storage.create_job()
+
+        for iter in range(iterations):
             # Get latest algocustomdata (model)
             trainings, seeds = self._local_jobs(self.latest_model(account))
             iteration = {
@@ -117,21 +119,23 @@ class FederatedTraining:
             # Start local training
             for compute, seed in zip(trainings, seeds):
                 job_info, auth_token = compute.start(account)
-
                 # Store job in FELT cloud
-                job_data = {
-                    "computeJob": job_info,
-                    "authToken": auth_token,
-                    "seed": seed,
-                }
-                self.storage.update_job(f"localTraining.{compute.did}", job_data)
+                self.storage.add_local_training(
+                    str(iter),
+                    seed,
+                    encrypt_nacl(auth_token, self.public_key),
+                    compute.did,
+                    job_info,
+                )
 
             # Wait for local training finish
             self._wait_for_compute(trainings, account)
 
             if self.type == "multi":
                 # Aggregation job and start aggregation
-                iteration["aggregation"] = self.run_aggregation(trainings, account)
+                iteration["aggregation"] = self.run_aggregation(
+                    str(iter), trainings, account
+                )
                 # Wait for aggregation to finish
                 self._wait_for_compute([iteration["aggregation"]], account)
                 iteration["final_job"] = iteration["aggregation"]
@@ -175,25 +179,6 @@ class FederatedTraining:
                 break
 
             time.sleep(5)
-
-    def _create_felt_job(self, account: LocalAccount) -> str:
-        timestamp = self._timestamp()
-        job_id = str(timestamp)
-
-        felt_job = {
-            "id": job_id,
-            "name": self.name,
-            "createdAt": timestamp,
-            "chainId": self.ocean.config_dict["chainId"],
-            "accountId": account.address,
-            "type": self.type,
-            "dataDIDs": self.dataset_dids,
-            "algoConfig": self.algorithm_config,
-            "localTraining": {},
-            "aggregation": {},
-        }
-        self.storage.create_job(felt_job)
-        return job_id
 
     def _timestamp(self):
         return int(datetime.now().timestamp() * 1000)
